@@ -274,10 +274,7 @@ fn match_pattern(input_line: &str, pattern: &str) -> Option<(usize, usize)> {
     }
 
     // We ran out of pattern to match, so we had a match!
-    Some((
-        match_start,
-        match_start + input_line.len() - remaining.len(),
-    ))
+    Some((match_start, input_line.len() - remaining.len()))
 }
 
 // Usage: echo <input_text> | your_program.sh -E <pattern>
@@ -295,7 +292,17 @@ fn main() {
 
     io::stdin().read_line(&mut input_line).unwrap();
 
-    if let Some(_) = match_pattern(&input_line, &pattern) {
+    if let Some((start, end)) = match_pattern(&input_line, &pattern) {
+        let bold = "\x1b[1m";
+        let regular = "\x1b[22m";
+        println!(
+            "{}{}{}{}{}",
+            &input_line[..start],
+            bold,
+            &input_line[start..end],
+            regular,
+            &input_line[end..]
+        );
         process::exit(0)
     } else {
         process::exit(1)
