@@ -8,6 +8,7 @@ enum PatternKind {
     Literal(char),
     AlphaNumeric,
     Digit,
+    InputStart,
 }
 
 struct SubPattern {
@@ -20,6 +21,9 @@ fn parse_pattern(pattern: &str) -> Vec<SubPattern> {
 
     while let Some(c) = chars.next() {
         match c {
+            '^' => subpatterns.push(SubPattern {
+                kind: PatternKind::InputStart,
+            }),
             '[' => {
                 let mut contents = String::new();
                 let mut kind = if let Some(nc) = chars.next() {
@@ -75,6 +79,10 @@ fn parse_pattern(pattern: &str) -> Vec<SubPattern> {
 
 fn match_subpattern(remaining: &str, sp: &SubPattern) -> Option<usize> {
     match sp {
+        SubPattern {
+            kind: PatternKind::InputStart,
+            ..
+        } => unreachable!(),
         SubPattern {
             kind: PatternKind::Literal(l),
             ..
@@ -135,15 +143,29 @@ fn find_match_start<'a, 'b>(input: &'a str, sp: &'b SubPattern) -> Option<(&'a s
 }
 
 fn match_pattern(input_line: &str, pattern: &str) -> bool {
-    let subpatterns = parse_pattern(pattern);
+    let mut subpatterns = parse_pattern(pattern);
     if subpatterns.is_empty() {
         return true;
     }
 
     // Start by trying to find somewhere in the input where we can start a match.
-    let Some((mut remaining, _)) = find_match_start(&input_line[0..], subpatterns.first().unwrap())
-    else {
-        return false;
+    // Unless we have a line start pattern ^, in which case we simply drop that pattern and
+    // expect matches to start at the beginning of input.
+    let mut remaining = if let Some(
+        SubPattern {
+            kind: PatternKind::InputStart,
+        },
+        ..,
+    ) = subpatterns.first()
+    {
+        subpatterns.remove(0);
+        &input_line[0..]
+    } else {
+        let Some((remaining, _)) = find_match_start(&input_line[0..], subpatterns.first().unwrap())
+        else {
+            return false; // Short-circuit if we couldn't find a match starting point.
+        };
+        remaining
     };
 
     // Try to match from there and fail if we cannot at some point.
