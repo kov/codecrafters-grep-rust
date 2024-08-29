@@ -63,7 +63,7 @@ fn parse_pattern(pattern: &str) -> Vec<SubPattern> {
                 Some(_) => todo!(),
                 None => todo!(),
             },
-            c if c.is_alphanumeric() => subpatterns.push(SubPattern {
+            c if c.is_alphanumeric() || c.is_ascii_whitespace() => subpatterns.push(SubPattern {
                 kind: PatternKind::Literal(c),
             }),
             _ => todo!(),
