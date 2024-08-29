@@ -14,6 +14,7 @@ enum PatternKind {
 
 #[derive(Debug)]
 enum Modifier {
+    ZeroOrOne,
     ZeroOrMore,
     OneOrMore,
 }
@@ -29,7 +30,7 @@ fn parse_pattern(pattern: &str) -> Vec<SubPattern> {
 
     while let Some(c) = chars.next() {
         let mut sp = match c {
-            '+' | '*' => continue, // Handled above. Skip.
+            '+' | '*' | '?' => continue, // Handled on the previous iteration. Skip.
             '^' => SubPattern {
                 kind: PatternKind::InputStart,
                 modifier: None,
@@ -98,6 +99,7 @@ fn parse_pattern(pattern: &str) -> Vec<SubPattern> {
             match nc {
                 '+' => sp.modifier = Some(Modifier::OneOrMore),
                 '*' => sp.modifier = Some(Modifier::ZeroOrMore),
+                '?' => sp.modifier = Some(Modifier::ZeroOrOne),
                 _ => (),
             }
         };
@@ -170,6 +172,13 @@ fn match_subpattern(remaining: &str, sp: &SubPattern) -> Option<usize> {
 
             // We may have matched or not, doesn't matter.
             Some(offset)
+        }
+        Some(Modifier::ZeroOrOne) => {
+            if let Some(offset) = match_subpattern_kind(remaining, &sp.kind) {
+                Some(offset)
+            } else {
+                Some(0)
+            }
         }
         None => match_subpattern_kind(remaining, &sp.kind),
     }
