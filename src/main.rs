@@ -1,7 +1,11 @@
+use lazy_static::lazy_static;
 use log::trace;
+use std::collections::HashMap;
 use std::env;
 use std::io;
 use std::process;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::sync::RwLock;
 
 #[derive(Debug)]
@@ -14,7 +18,7 @@ enum PatternKind {
     InputStart,
     InputEnd,
     Any,
-    AlternateGroups(Vec<String>),
+    AlternateGroups(usize, Vec<Vec<SubPattern>>),
     BackRef(usize),
 }
 
@@ -31,7 +35,10 @@ struct SubPattern {
     modifier: Option<Modifier>,
 }
 
-static BACKREFS: RwLock<Vec<String>> = RwLock::new(vec![]);
+lazy_static! {
+    static ref BACKREFS: RwLock<HashMap<usize, String>> = RwLock::new(HashMap::new());
+    static ref NUM_OF_BACKREFS: AtomicUsize = AtomicUsize::new(0);
+}
 
 fn parse_pattern(pattern: &str) -> Vec<SubPattern> {
     let mut subpatterns = vec![];
@@ -56,19 +63,30 @@ fn parse_pattern(pattern: &str) -> Vec<SubPattern> {
                 let mut groups = vec![];
                 let mut contents = String::new();
 
+                let mut nesting_depth = 0;
                 while let Some(c) = chars.next() {
-                    if c == ')' {
-                        break;
+                    if c == '(' {
+                        nesting_depth += 1;
+                    } else if c == ')' {
+                        nesting_depth -= 1;
+                        if nesting_depth < 0 {
+                            break;
+                        }
                     } else if c == '|' {
-                        groups.push(std::mem::take(&mut contents));
-                        continue;
+                        if nesting_depth == 0 {
+                            groups.push(std::mem::take(&mut contents));
+                            continue;
+                        }
                     }
                     contents.push(c);
                 }
                 groups.push(contents);
 
                 SubPattern {
-                    kind: PatternKind::AlternateGroups(groups),
+                    kind: PatternKind::AlternateGroups(
+                        NUM_OF_BACKREFS.fetch_add(1, Ordering::SeqCst),
+                        groups.iter().map(|group| parse_pattern(group)).collect(),
+                    ),
                     modifier: None,
                 }
             }
@@ -129,6 +147,10 @@ fn parse_pattern(pattern: &str) -> Vec<SubPattern> {
                 }
                 Some(_) => todo!(),
                 None => todo!(),
+            },
+            c if c == '\'' => SubPattern {
+                kind: PatternKind::Literal(c),
+                modifier: None,
             },
             c => SubPattern {
                 kind: PatternKind::Literal(c),
@@ -200,23 +222,22 @@ fn match_subpattern_kind(remaining: &str, kind: &PatternKind) -> Option<usize> {
 
             Some(1)
         }
-        PatternKind::AlternateGroups(groups) => {
+        PatternKind::AlternateGroups(bref, groups) => {
             for g in groups {
-                if let Some((start, end)) = match_pattern(remaining, g, true) {
-                    if start == 0 {
-                        BACKREFS
-                            .write()
-                            .unwrap()
-                            .push(remaining[start..end].to_string());
-                        return Some(end);
-                    }
+                if let Some(offset) = match_all_subpatterns(remaining, g) {
+                    BACKREFS
+                        .write()
+                        .unwrap()
+                        .entry(*bref)
+                        .or_insert(remaining[..offset].to_string());
+                    return Some(offset);
                 }
             }
 
             None
         }
         PatternKind::BackRef(i) => {
-            if let Some(g) = BACKREFS.read().unwrap().get(*i - 1) {
+            if let Some(g) = BACKREFS.read().unwrap().get(&(*i - 1)) {
                 if let Some((start, end)) = match_pattern(remaining, g.as_str(), true) {
                     if start == 0 {
                         return Some(end);
@@ -273,6 +294,20 @@ fn find_match_start<'a, 'b>(input: &'a str, sp: &'b SubPattern) -> Option<(&'a s
     None
 }
 
+fn match_all_subpatterns(input: &str, subpatterns: &[SubPattern]) -> Option<usize> {
+    let mut remaining = input;
+    for sp in subpatterns {
+        trace!("MATCHING {sp:?} against {remaining}");
+        let Some(offset) = match_subpattern(remaining, sp) else {
+            return None;
+        };
+
+        remaining = &remaining[offset..];
+    }
+
+    Some(input.len() - remaining.len())
+}
+
 fn match_pattern(
     input_line: &str,
     pattern: &str,
@@ -309,7 +344,7 @@ fn match_pattern(
 
     // Try to match from there and fail if we cannot at some point.
     for sp in &subpatterns {
-        trace!("MATCHING {sp:?} against {remaining} | {BACKREFS:?}");
+        trace!("MATCHING {sp:?} against {remaining}");
         let Some(offset) = match_subpattern(remaining, sp) else {
             return None;
         };
