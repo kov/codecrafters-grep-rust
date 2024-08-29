@@ -4,6 +4,7 @@ use std::process;
 
 enum PatternKind {
     Alternatives(Vec<SubPattern>),
+    NotAlternatives(Vec<SubPattern>),
     Literal(char),
     AlphaNumeric,
     Digit,
@@ -21,15 +22,33 @@ fn parse_pattern(pattern: &str) -> Vec<SubPattern> {
         match c {
             '[' => {
                 let mut contents = String::new();
+                let mut kind = if let Some(nc) = chars.next() {
+                    if nc == '^' {
+                        PatternKind::NotAlternatives(vec![])
+                    } else {
+                        contents.push(nc);
+                        PatternKind::Alternatives(vec![])
+                    }
+                } else {
+                    unreachable!()
+                };
+
                 while let Some(c) = chars.next() {
                     if c == ']' {
                         break;
                     }
                     contents.push(c);
                 }
-                subpatterns.push(SubPattern {
-                    kind: PatternKind::Alternatives(parse_pattern(contents.as_str())),
-                });
+
+                match kind {
+                    PatternKind::Alternatives(ref mut v)
+                    | PatternKind::NotAlternatives(ref mut v) => {
+                        v.extend(parse_pattern(contents.as_str()).into_iter());
+                    }
+                    _ => unreachable!(),
+                }
+
+                subpatterns.push(SubPattern { kind });
             }
             '\\' => match chars.next() {
                 Some(nc) if nc == '\\' => subpatterns.push(SubPattern {
@@ -91,7 +110,18 @@ fn match_subpattern(remaining: &str, sp: &SubPattern) -> Option<usize> {
             }
             None
         }
-        _ => todo!(),
+        SubPattern {
+            kind: PatternKind::NotAlternatives(v),
+            ..
+        } => {
+            for alternative in v {
+                if let Some(_) = match_subpattern(remaining, alternative) {
+                    return None;
+                }
+            }
+
+            Some(1)
+        }
     }
 }
 
