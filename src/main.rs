@@ -3,6 +3,7 @@ use std::io;
 use std::process;
 
 enum PatternKind {
+    Alternatives(Vec<SubPattern>),
     Literal(char),
     AlphaNumeric,
     Digit,
@@ -18,6 +19,18 @@ fn parse_pattern(pattern: &str) -> Vec<SubPattern> {
 
     while let Some(c) = chars.next() {
         match c {
+            '[' => {
+                let mut contents = String::new();
+                while let Some(c) = chars.next() {
+                    if c == ']' {
+                        break;
+                    }
+                    contents.push(c);
+                }
+                subpatterns.push(SubPattern {
+                    kind: PatternKind::Alternatives(parse_pattern(contents.as_str())),
+                });
+            }
             '\\' => match chars.next() {
                 Some(nc) if nc == '\\' => subpatterns.push(SubPattern {
                     kind: PatternKind::Literal('\\'),
@@ -67,6 +80,17 @@ fn match_subpattern(remaining: &str, sp: &SubPattern) -> Option<usize> {
             Some(c) if c.is_alphanumeric() || c == '_' => Some(1),
             Some(_) | None => None,
         },
+        SubPattern {
+            kind: PatternKind::Alternatives(v),
+            ..
+        } => {
+            for alternative in v {
+                if let Some(offset) = match_subpattern(remaining, alternative) {
+                    return Some(offset);
+                }
+            }
+            None
+        }
         _ => todo!(),
     }
 }
