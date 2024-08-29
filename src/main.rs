@@ -1,3 +1,4 @@
+use log::trace;
 use std::env;
 use std::io;
 use std::process;
@@ -263,8 +264,10 @@ fn match_subpattern(remaining: &str, sp: &SubPattern) -> Option<usize> {
 
 fn find_match_start<'a, 'b>(input: &'a str, sp: &'b SubPattern) -> Option<(&'a str, usize)> {
     for n in 0..input.len() {
+        trace!("{n} attempt at finding first match...");
         if let Some(offset) = match_subpattern(&input[n..], sp) {
-            return Some((&input[offset..], n));
+            trace!("Found first match at {n} offset {offset}");
+            return Some((&input[n + offset..], n));
         }
     }
     None
@@ -306,6 +309,7 @@ fn match_pattern(
 
     // Try to match from there and fail if we cannot at some point.
     for sp in &subpatterns {
+        trace!("MATCHING {sp:?} against {remaining} | {BACKREFS:?}");
         let Some(offset) = match_subpattern(remaining, sp) else {
             return None;
         };
@@ -319,6 +323,8 @@ fn match_pattern(
 
 // Usage: echo <input_text> | your_program.sh -E <pattern>
 fn main() {
+    env_logger::init();
+
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
 
