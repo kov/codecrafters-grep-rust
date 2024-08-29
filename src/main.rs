@@ -4,6 +4,7 @@ use std::process;
 
 enum PatternKind {
     Literal(char),
+    AlphaNumeric,
     Digit,
 }
 
@@ -23,6 +24,9 @@ fn parse_pattern(pattern: &str) -> Vec<SubPattern> {
                 }),
                 Some(nc) if nc == 'd' => subpatterns.push(SubPattern {
                     kind: PatternKind::Digit,
+                }),
+                Some(nc) if nc == 'w' => subpatterns.push(SubPattern {
+                    kind: PatternKind::AlphaNumeric,
                 }),
                 Some(_) => todo!(),
                 None => todo!(),
@@ -54,6 +58,13 @@ fn match_subpattern(remaining: &str, sp: &SubPattern) -> Option<usize> {
             ..
         } => match remaining.chars().nth(0) {
             Some(c) if c.is_digit(10) => Some(1),
+            Some(_) | None => None,
+        },
+        SubPattern {
+            kind: PatternKind::AlphaNumeric,
+            ..
+        } => match remaining.chars().nth(0) {
+            Some(c) if c.is_alphanumeric() || c == '_' => Some(1),
             Some(_) | None => None,
         },
         _ => todo!(),
