@@ -1,6 +1,7 @@
 use std::env;
 use std::io;
 use std::process;
+use std::sync::RwLock;
 
 #[derive(Debug)]
 enum PatternKind {
@@ -13,6 +14,7 @@ enum PatternKind {
     InputEnd,
     Any,
     AlternateGroups(Vec<String>),
+    BackRef(usize),
 }
 
 #[derive(Debug)]
@@ -27,6 +29,8 @@ struct SubPattern {
     kind: PatternKind,
     modifier: Option<Modifier>,
 }
+
+static BACKREFS: RwLock<Vec<String>> = RwLock::new(vec![]);
 
 fn parse_pattern(pattern: &str) -> Vec<SubPattern> {
     let mut subpatterns = vec![];
@@ -113,6 +117,15 @@ fn parse_pattern(pattern: &str) -> Vec<SubPattern> {
                     kind: PatternKind::AlphaNumeric,
                     modifier: None,
                 },
+                Some(nc) if nc.is_digit(10) => {
+                    let mut tmp = [0u8; 4];
+                    SubPattern {
+                        kind: PatternKind::BackRef(
+                            nc.encode_utf8(&mut tmp).parse::<usize>().unwrap(),
+                        ),
+                        modifier: None,
+                    }
+                }
                 Some(_) => todo!(),
                 None => todo!(),
             },
@@ -191,12 +204,21 @@ fn match_subpattern_kind(remaining: &str, kind: &PatternKind) -> Option<usize> {
             for g in groups {
                 if let Some((start, end)) = match_pattern(remaining, g) {
                     if start == 0 {
+                        BACKREFS.write().unwrap().push(g.clone());
                         return Some(end);
                     }
                 }
             }
 
             None
+        }
+        PatternKind::BackRef(i) => {
+            let g = BACKREFS.read().unwrap().get(*i).map(|g| g.clone());
+            if let Some(g) = g {
+                match_subpattern_kind(remaining, &PatternKind::AlternateGroups(vec![g.clone()]))
+            } else {
+                None
+            }
         }
     }
 }
