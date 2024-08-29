@@ -2,6 +2,7 @@ use std::env;
 use std::io;
 use std::process;
 
+#[derive(Debug)]
 enum PatternKind {
     Alternatives(Vec<SubPattern>),
     NotAlternatives(Vec<SubPattern>),
@@ -11,6 +12,7 @@ enum PatternKind {
     InputStart,
     InputEnd,
     Any,
+    AlternateGroups(Vec<String>),
 }
 
 #[derive(Debug)]
@@ -20,6 +22,7 @@ enum Modifier {
     OneOrMore,
 }
 
+#[derive(Debug)]
 struct SubPattern {
     kind: PatternKind,
     modifier: Option<Modifier>,
@@ -44,6 +47,26 @@ fn parse_pattern(pattern: &str) -> Vec<SubPattern> {
                 kind: PatternKind::InputEnd,
                 modifier: None,
             },
+            '(' => {
+                let mut groups = vec![];
+                let mut contents = String::new();
+
+                while let Some(c) = chars.next() {
+                    if c == ')' {
+                        break;
+                    } else if c == '|' {
+                        groups.push(std::mem::take(&mut contents));
+                        continue;
+                    }
+                    contents.push(c);
+                }
+                groups.push(contents);
+
+                SubPattern {
+                    kind: PatternKind::AlternateGroups(groups),
+                    modifier: None,
+                }
+            }
             '[' => {
                 let mut contents = String::new();
                 let mut kind = if let Some(nc) = chars.next() {
@@ -164,6 +187,17 @@ fn match_subpattern_kind(remaining: &str, kind: &PatternKind) -> Option<usize> {
 
             Some(1)
         }
+        PatternKind::AlternateGroups(groups) => {
+            for g in groups {
+                if let Some((start, end)) = match_pattern(remaining, g) {
+                    if start == 0 {
+                        return Some(end);
+                    }
+                }
+            }
+
+            None
+        }
     }
 }
 
@@ -198,48 +232,52 @@ fn match_subpattern(remaining: &str, sp: &SubPattern) -> Option<usize> {
 
 fn find_match_start<'a, 'b>(input: &'a str, sp: &'b SubPattern) -> Option<(&'a str, usize)> {
     for n in 0..input.len() {
-        if let Some(count) = match_subpattern(&input[n..], sp) {
-            return Some((&input[n..], count));
+        if let Some(_) = match_subpattern(&input[n..], sp) {
+            return Some((&input[n..], n));
         }
     }
     None
 }
 
-fn match_pattern(input_line: &str, pattern: &str) -> bool {
+fn match_pattern(input_line: &str, pattern: &str) -> Option<(usize, usize)> {
     let mut subpatterns = parse_pattern(pattern);
     if subpatterns.is_empty() {
-        return true;
+        return Some((0, 0));
     }
 
     // Start by trying to find somewhere in the input where we can start a match.
     // Unless we have a line start pattern ^, in which case we simply drop that pattern and
     // expect matches to start at the beginning of input.
-    let mut remaining = if let Some(SubPattern {
+    let (mut remaining, match_start) = if let Some(SubPattern {
         kind: PatternKind::InputStart,
         ..
     }) = subpatterns.first()
     {
         subpatterns.remove(0);
-        &input_line[0..]
+        (&input_line[0..], 0)
     } else {
-        let Some((remaining, _)) = find_match_start(&input_line[0..], subpatterns.first().unwrap())
+        let Some((remaining, match_start)) =
+            find_match_start(&input_line[0..], subpatterns.first().unwrap())
         else {
-            return false; // Short-circuit if we couldn't find a match starting point.
+            return None; // Short-circuit if we couldn't find a match starting point.
         };
-        remaining
+        (remaining, match_start)
     };
 
     // Try to match from there and fail if we cannot at some point.
     for sp in &subpatterns {
         let Some(offset) = match_subpattern(remaining, sp) else {
-            return false;
+            return None;
         };
 
         remaining = &remaining[offset..];
     }
 
     // We ran out of pattern to match, so we had a match!
-    true
+    Some((
+        match_start,
+        match_start + input_line.len() - remaining.len(),
+    ))
 }
 
 // Usage: echo <input_text> | your_program.sh -E <pattern>
@@ -257,7 +295,7 @@ fn main() {
 
     io::stdin().read_line(&mut input_line).unwrap();
 
-    if match_pattern(&input_line, &pattern) {
+    if let Some(_) = match_pattern(&input_line, &pattern) {
         process::exit(0)
     } else {
         process::exit(1)
