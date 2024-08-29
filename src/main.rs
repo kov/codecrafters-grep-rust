@@ -10,6 +10,7 @@ enum PatternKind {
     Digit,
     InputStart,
     InputEnd,
+    Any,
 }
 
 #[derive(Debug)]
@@ -31,6 +32,10 @@ fn parse_pattern(pattern: &str) -> Vec<SubPattern> {
     while let Some(c) = chars.next() {
         let mut sp = match c {
             '+' | '*' | '?' => continue, // Handled on the previous iteration. Skip.
+            '.' => SubPattern {
+                kind: PatternKind::Any,
+                modifier: None,
+            },
             '^' => SubPattern {
                 kind: PatternKind::InputStart,
                 modifier: None,
@@ -116,6 +121,13 @@ fn match_subpattern_kind(remaining: &str, kind: &PatternKind) -> Option<usize> {
         PatternKind::InputEnd => {
             if remaining.is_empty() {
                 Some(0)
+            } else {
+                None
+            }
+        }
+        PatternKind::Any => {
+            if !remaining.is_empty() {
+                Some(1)
             } else {
                 None
             }
