@@ -9,6 +9,7 @@ enum PatternKind {
     AlphaNumeric,
     Digit,
     InputStart,
+    InputEnd,
 }
 
 struct SubPattern {
@@ -23,6 +24,9 @@ fn parse_pattern(pattern: &str) -> Vec<SubPattern> {
         match c {
             '^' => subpatterns.push(SubPattern {
                 kind: PatternKind::InputStart,
+            }),
+            '$' => subpatterns.push(SubPattern {
+                kind: PatternKind::InputEnd,
             }),
             '[' => {
                 let mut contents = String::new();
@@ -83,6 +87,16 @@ fn match_subpattern(remaining: &str, sp: &SubPattern) -> Option<usize> {
             kind: PatternKind::InputStart,
             ..
         } => unreachable!(),
+        SubPattern {
+            kind: PatternKind::InputEnd,
+            ..
+        } => {
+            if remaining.is_empty() {
+                Some(0)
+            } else {
+                None
+            }
+        }
         SubPattern {
             kind: PatternKind::Literal(l),
             ..
