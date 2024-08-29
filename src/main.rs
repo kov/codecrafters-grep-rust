@@ -129,11 +129,10 @@ fn parse_pattern(pattern: &str) -> Vec<SubPattern> {
                 Some(_) => todo!(),
                 None => todo!(),
             },
-            c if c.is_alphanumeric() || c.is_ascii_whitespace() => SubPattern {
+            c => SubPattern {
                 kind: PatternKind::Literal(c),
                 modifier: None,
             },
-            c => panic!("Unhandled character: {c}"),
         };
 
         if let Some(nc) = chars.peek() {
