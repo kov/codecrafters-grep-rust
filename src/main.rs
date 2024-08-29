@@ -201,9 +201,12 @@ fn match_subpattern_kind(remaining: &str, kind: &PatternKind) -> Option<usize> {
         }
         PatternKind::AlternateGroups(groups) => {
             for g in groups {
-                if let Some((start, end)) = match_pattern(remaining, g) {
+                if let Some((start, end)) = match_pattern(remaining, g, true) {
                     if start == 0 {
-                        BACKREFS.write().unwrap().push(g.clone());
+                        BACKREFS
+                            .write()
+                            .unwrap()
+                            .push(remaining[start..end].to_string());
                         return Some(end);
                     }
                 }
@@ -213,7 +216,7 @@ fn match_subpattern_kind(remaining: &str, kind: &PatternKind) -> Option<usize> {
         }
         PatternKind::BackRef(i) => {
             if let Some(g) = BACKREFS.read().unwrap().get(*i - 1) {
-                if let Some((start, end)) = match_pattern(remaining, g.as_str()) {
+                if let Some((start, end)) = match_pattern(remaining, g.as_str(), true) {
                     if start == 0 {
                         return Some(end);
                     }
@@ -267,7 +270,11 @@ fn find_match_start<'a, 'b>(input: &'a str, sp: &'b SubPattern) -> Option<(&'a s
     None
 }
 
-fn match_pattern(input_line: &str, pattern: &str) -> Option<(usize, usize)> {
+fn match_pattern(
+    input_line: &str,
+    pattern: &str,
+    force_from_start: bool,
+) -> Option<(usize, usize)> {
     let mut subpatterns = parse_pattern(pattern);
     if subpatterns.is_empty() {
         return Some((0, 0));
@@ -276,21 +283,25 @@ fn match_pattern(input_line: &str, pattern: &str) -> Option<(usize, usize)> {
     // Start by trying to find somewhere in the input where we can start a match.
     // Unless we have a line start pattern ^, in which case we simply drop that pattern and
     // expect matches to start at the beginning of input.
-    let (mut remaining, match_start) = if let Some(SubPattern {
-        kind: PatternKind::InputStart,
-        ..
-    }) = subpatterns.first()
-    {
-        subpatterns.remove(0);
+    let (mut remaining, match_start) = if force_from_start {
         (&input_line[0..], 0)
     } else {
-        let Some((remaining, match_start)) =
-            find_match_start(&input_line[0..], subpatterns.first().unwrap())
-        else {
-            return None; // Short-circuit if we couldn't find a match starting point.
-        };
-        subpatterns.remove(0);
-        (remaining, match_start)
+        if let Some(SubPattern {
+            kind: PatternKind::InputStart,
+            ..
+        }) = subpatterns.first()
+        {
+            subpatterns.remove(0);
+            (&input_line[0..], 0)
+        } else {
+            let Some((remaining, match_start)) =
+                find_match_start(&input_line[0..], subpatterns.first().unwrap())
+            else {
+                return None; // Short-circuit if we couldn't find a match starting point.
+            };
+            subpatterns.remove(0);
+            (remaining, match_start)
+        }
     };
 
     // Try to match from there and fail if we cannot at some point.
@@ -321,7 +332,7 @@ fn main() {
 
     io::stdin().read_line(&mut input_line).unwrap();
 
-    if let Some((start, end)) = match_pattern(&input_line, &pattern) {
+    if let Some((start, end)) = match_pattern(&input_line, &pattern, false) {
         let bold = "\x1b[1m";
         let regular = "\x1b[22m";
         println!(
