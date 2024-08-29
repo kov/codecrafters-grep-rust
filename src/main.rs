@@ -212,9 +212,13 @@ fn match_subpattern_kind(remaining: &str, kind: &PatternKind) -> Option<usize> {
             None
         }
         PatternKind::BackRef(i) => {
-            let g = BACKREFS.read().unwrap().get(*i).map(|g| g.clone());
-            if let Some(g) = g {
-                match_subpattern_kind(remaining, &PatternKind::AlternateGroups(vec![g.clone()]))
+            if let Some(g) = BACKREFS.read().unwrap().get(*i - 1) {
+                if let Some((start, end)) = match_pattern(remaining, g.as_str()) {
+                    if start == 0 {
+                        return Some(end);
+                    }
+                }
+                None
             } else {
                 None
             }
@@ -256,8 +260,8 @@ fn match_subpattern(remaining: &str, sp: &SubPattern) -> Option<usize> {
 
 fn find_match_start<'a, 'b>(input: &'a str, sp: &'b SubPattern) -> Option<(&'a str, usize)> {
     for n in 0..input.len() {
-        if let Some(_) = match_subpattern(&input[n..], sp) {
-            return Some((&input[n..], n));
+        if let Some(offset) = match_subpattern(&input[n..], sp) {
+            return Some((&input[offset..], n));
         }
     }
     None
@@ -285,6 +289,7 @@ fn match_pattern(input_line: &str, pattern: &str) -> Option<(usize, usize)> {
         else {
             return None; // Short-circuit if we couldn't find a match starting point.
         };
+        subpatterns.remove(0);
         (remaining, match_start)
     };
 
