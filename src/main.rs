@@ -228,6 +228,9 @@ fn match_subpattern(remaining: &str, sp: &SubPattern) -> Option<usize> {
             let mut still_remaining = remaining;
             while let Some(offset) = match_subpattern_kind(still_remaining, &sp.kind) {
                 still_remaining = &still_remaining[offset..];
+                if still_remaining.is_empty() {
+                    break;
+                }
             }
 
             let offset = remaining.len() - still_remaining.len();
