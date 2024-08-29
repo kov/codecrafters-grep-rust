@@ -12,22 +12,32 @@ enum PatternKind {
     InputEnd,
 }
 
+#[derive(Debug)]
+enum Modifier {
+    ZeroOrMore,
+    OneOrMore,
+}
+
 struct SubPattern {
     kind: PatternKind,
+    modifier: Option<Modifier>,
 }
 
 fn parse_pattern(pattern: &str) -> Vec<SubPattern> {
     let mut subpatterns = vec![];
-    let mut chars = pattern.chars();
+    let mut chars = pattern.chars().peekable();
 
     while let Some(c) = chars.next() {
-        match c {
-            '^' => subpatterns.push(SubPattern {
+        let mut sp = match c {
+            '+' | '*' => continue, // Handled above. Skip.
+            '^' => SubPattern {
                 kind: PatternKind::InputStart,
-            }),
-            '$' => subpatterns.push(SubPattern {
+                modifier: None,
+            },
+            '$' => SubPattern {
                 kind: PatternKind::InputEnd,
-            }),
+                modifier: None,
+            },
             '[' => {
                 let mut contents = String::new();
                 let mut kind = if let Some(nc) = chars.next() {
@@ -56,75 +66,74 @@ fn parse_pattern(pattern: &str) -> Vec<SubPattern> {
                     _ => unreachable!(),
                 }
 
-                subpatterns.push(SubPattern { kind });
+                SubPattern {
+                    kind,
+                    modifier: None,
+                }
             }
             '\\' => match chars.next() {
-                Some(nc) if nc == '\\' => subpatterns.push(SubPattern {
+                Some(nc) if nc == '\\' => SubPattern {
                     kind: PatternKind::Literal('\\'),
-                }),
-                Some(nc) if nc == 'd' => subpatterns.push(SubPattern {
+                    modifier: None,
+                },
+                Some(nc) if nc == 'd' => SubPattern {
                     kind: PatternKind::Digit,
-                }),
-                Some(nc) if nc == 'w' => subpatterns.push(SubPattern {
+                    modifier: None,
+                },
+                Some(nc) if nc == 'w' => SubPattern {
                     kind: PatternKind::AlphaNumeric,
-                }),
+                    modifier: None,
+                },
                 Some(_) => todo!(),
                 None => todo!(),
             },
-            c if c.is_alphanumeric() || c.is_ascii_whitespace() => subpatterns.push(SubPattern {
+            c if c.is_alphanumeric() || c.is_ascii_whitespace() => SubPattern {
                 kind: PatternKind::Literal(c),
-            }),
-            _ => todo!(),
-        }
+                modifier: None,
+            },
+            c => panic!("Unhandled character: {c}"),
+        };
+
+        if let Some(nc) = chars.peek() {
+            match nc {
+                '+' => sp.modifier = Some(Modifier::OneOrMore),
+                '*' => sp.modifier = Some(Modifier::ZeroOrMore),
+                _ => (),
+            }
+        };
+
+        subpatterns.push(sp);
     }
 
     subpatterns
 }
 
-fn match_subpattern(remaining: &str, sp: &SubPattern) -> Option<usize> {
-    match sp {
-        SubPattern {
-            kind: PatternKind::InputStart,
-            ..
-        } => unreachable!(),
-        SubPattern {
-            kind: PatternKind::InputEnd,
-            ..
-        } => {
+fn match_subpattern_kind(remaining: &str, kind: &PatternKind) -> Option<usize> {
+    match kind {
+        PatternKind::InputStart => unreachable!(),
+        PatternKind::InputEnd => {
             if remaining.is_empty() {
                 Some(0)
             } else {
                 None
             }
         }
-        SubPattern {
-            kind: PatternKind::Literal(l),
-            ..
-        } => {
+        PatternKind::Literal(l) => {
             if remaining.starts_with(*l) {
                 Some(1)
             } else {
                 None
             }
         }
-        SubPattern {
-            kind: PatternKind::Digit,
-            ..
-        } => match remaining.chars().nth(0) {
+        PatternKind::Digit => match remaining.chars().nth(0) {
             Some(c) if c.is_digit(10) => Some(1),
             Some(_) | None => None,
         },
-        SubPattern {
-            kind: PatternKind::AlphaNumeric,
-            ..
-        } => match remaining.chars().nth(0) {
+        PatternKind::AlphaNumeric => match remaining.chars().nth(0) {
             Some(c) if c.is_alphanumeric() || c == '_' => Some(1),
             Some(_) | None => None,
         },
-        SubPattern {
-            kind: PatternKind::Alternatives(v),
-            ..
-        } => {
+        PatternKind::Alternatives(v) => {
             for alternative in v {
                 if let Some(offset) = match_subpattern(remaining, alternative) {
                     return Some(offset);
@@ -132,10 +141,7 @@ fn match_subpattern(remaining: &str, sp: &SubPattern) -> Option<usize> {
             }
             None
         }
-        SubPattern {
-            kind: PatternKind::NotAlternatives(v),
-            ..
-        } => {
+        PatternKind::NotAlternatives(v) => {
             for alternative in v {
                 if let Some(_) = match_subpattern(remaining, alternative) {
                     return None;
@@ -144,6 +150,28 @@ fn match_subpattern(remaining: &str, sp: &SubPattern) -> Option<usize> {
 
             Some(1)
         }
+    }
+}
+
+fn match_subpattern(remaining: &str, sp: &SubPattern) -> Option<usize> {
+    match sp.modifier {
+        Some(Modifier::ZeroOrMore) | Some(Modifier::OneOrMore) => {
+            let mut still_remaining = remaining;
+            while let Some(offset) = match_subpattern_kind(still_remaining, &sp.kind) {
+                still_remaining = &still_remaining[offset..];
+            }
+
+            let offset = remaining.len() - still_remaining.len();
+
+            // We didn't match a single instance, but we must.
+            if matches!(sp.modifier, Some(Modifier::OneOrMore)) && offset == 0 {
+                return None;
+            }
+
+            // We may have matched or not, doesn't matter.
+            Some(offset)
+        }
+        None => match_subpattern_kind(remaining, &sp.kind),
     }
 }
 
@@ -165,12 +193,10 @@ fn match_pattern(input_line: &str, pattern: &str) -> bool {
     // Start by trying to find somewhere in the input where we can start a match.
     // Unless we have a line start pattern ^, in which case we simply drop that pattern and
     // expect matches to start at the beginning of input.
-    let mut remaining = if let Some(
-        SubPattern {
-            kind: PatternKind::InputStart,
-        },
-        ..,
-    ) = subpatterns.first()
+    let mut remaining = if let Some(SubPattern {
+        kind: PatternKind::InputStart,
+        ..
+    }) = subpatterns.first()
     {
         subpatterns.remove(0);
         &input_line[0..]
