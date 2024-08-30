@@ -343,11 +343,51 @@ fn match_pattern(
     };
 
     // Try to match from there and fail if we cannot at some point.
+    let mut previous_sp: Option<&SubPattern> = None;
+    let mut previous_remaining = remaining;
     for sp in &subpatterns {
         trace!("MATCHING {sp:?} against {remaining}");
-        let Some(offset) = match_subpattern(remaining, sp) else {
-            return None;
+        let offset = match match_subpattern(remaining, sp) {
+            Some(offset) => offset,
+            None => {
+                trace!("Backtracking...");
+                if let Some(psp) = previous_sp {
+                    if matches!(
+                        psp.modifier,
+                        Some(Modifier::ZeroOrMore) | Some(Modifier::OneOrMore)
+                    ) || matches!(
+                        previous_sp,
+                        Some(SubPattern {
+                            kind: PatternKind::AlternateGroups { .. },
+                            ..
+                        })
+                    ) {
+                        trace!("Matched prev {previous_remaining} <- {remaining}");
+                        // We had a greedy operator before us, but still have a pattern to match, so we need to backtrack.
+                        remaining = if matches!(psp.modifier, Some(Modifier::ZeroOrMore)) {
+                            previous_remaining
+                        } else {
+                            &previous_remaining[1..]
+                        };
+
+                        let Some((_, match_start)) = find_match_start(remaining, sp) else {
+                            return None;
+                        };
+
+                        remaining = &remaining[match_start..];
+
+                        match_subpattern(remaining, sp).unwrap()
+                    } else {
+                        return None;
+                    }
+                } else {
+                    return None;
+                }
+            }
         };
+
+        previous_sp = Some(sp);
+        previous_remaining = remaining;
 
         remaining = &remaining[offset..];
     }
