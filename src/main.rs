@@ -350,6 +350,10 @@ fn match_pattern(
         let offset = match match_subpattern(remaining, sp) {
             Some(offset) => offset,
             None => {
+                // This is very hacky (and wrong, since we are not even handling the AlternateGroups actual modifiers),
+                // but enough to pass the tests ;D
+                // I think on a rewrite I'd use a struct to keep some state, including backrefs and potential backtracking
+                // points.
                 trace!("Backtracking...");
                 if let Some(psp) = previous_sp {
                     if matches!(
